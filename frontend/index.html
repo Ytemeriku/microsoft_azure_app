@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #0078d4;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #005a9e;
+        }
+        input[type="text"], input[type="file"] {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin: 15px 0;
+            text-align: left;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        #response {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #e7f3ff;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Azure App</h1>
+        <p>Aplikacja pokazująca PostgreSQL i Blob Storage na Azure</p>
+        
+        <h3>Baza danych PostgreSQL - Uzytkownicy</h3>
+        <div class="form-group">
+            <label for="userName">Imię:</label>
+            <input type="text" id="userName">
+            <label for="userSurname">Nazwisko:</label>
+            <input type="text" id="userSurname">
+            <label for="userPassword">Hasło (min. 8 znaków):</label>
+            <input type="text" id="userPassword">
+            <button onclick="addUser()">Dodaj użytkownika</button>
+        </div>
+        <button onclick="getUsers()">Pokaż użytkowników</button>
+        
+        <h3>Blob Storage - Upload PDF</h3>
+        <div class="form-group">
+            <label for="pdfFile">Wybierz plik PDF:</label>
+            <input type="file" id="pdfFile" accept=".pdf">
+            <button onclick="uploadPDF()">Upload PDF do Blob Storage</button>
+        </div>
+        <button onclick="listBlobs()">Lista plików w Blob Storage</button>
+        
+        <div id="response"></div>
+    </div>
+
+    <script src="/config.js"></script>
+    <script>
+        const API_BASE_URL = window.__API_BASE_URL__ || '';
+
+        function apiUrl(path) {
+            const base = API_BASE_URL ? API_BASE_URL.replace(/\/$/, '') : '';
+            return `${base}${path}`;
+        }
+
+        async function addUser() {
+            const name = document.getElementById('userName').value.trim();
+            const surname = document.getElementById('userSurname').value.trim();
+            const password = document.getElementById('userPassword').value;
+            
+            if (!name || !surname || !password) {
+                showResponse('Błąd: prosze wypelnic imie, nazwisko i haslo', true);
+                return;
+            }
+
+            if (password.length < 8) {
+                showResponse('Błąd: haslo musi miec co najmniej 8 znakow', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(apiUrl('/api/db/users'), {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, surname: surname, password: password})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    showResponse(`Dodano uzytkownika: ${data.name} ${data.surname} (ID: ${data.id})`);
+                    document.getElementById('userName').value = '';
+                    document.getElementById('userSurname').value = '';
+                    document.getElementById('userPassword').value = '';
+                } else {
+                    showResponse(`Błąd: ${data.error}`, true);
+                }
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        async function getUsers() {
+            try {
+                const response = await fetch(apiUrl('/api/db/users'));
+                const data = await response.json();
+                let html = '<h3>Lista uzytkownikow z PostgreSQL:</h3>';
+                if (data.users.length === 0) {
+                    html += '<p>Brak użytkowników. Dodaj pierwszego!</p>';
+                } else {
+                    html += '<ul style="text-align: left;">';
+                    data.users.forEach(user => {
+                        html += `
+                            <li>
+                                <strong>${user.name} ${user.surname}</strong> (ID: ${user.id}, Data: ${user.creation_date})
+                                <div style="margin-top: 6px;">
+                                    <button onclick="editUser(${user.id}, '${user.name}', '${user.surname}')">Edytuj</button>
+                                    <button onclick="deleteUser(${user.id})" style="background-color: #d83b01;">Usuń</button>
+                                </div>
+                            </li>
+                        `;
+                    });
+                    html += '</ul>';
+                }
+                showResponse(html);
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        async function editUser(userId, currentName, currentSurname) {
+            const newName = prompt('Nowe imię:', currentName);
+            if (newName === null) return;
+
+            const newSurname = prompt('Nowe nazwisko:', currentSurname);
+            if (newSurname === null) return;
+
+            const newPassword = prompt('Nowe hasło (opcjonalnie, min. 8 znaków):', '');
+            if (newPassword === null) return;
+
+            const payload = {};
+            if (newName.trim()) payload.name = newName.trim();
+            if (newSurname.trim()) payload.surname = newSurname.trim();
+
+            if (newPassword.trim()) {
+                if (newPassword.trim().length < 8) {
+                    showResponse('Błąd: haslo musi miec co najmniej 8 znakow', true);
+                    return;
+                }
+                payload.password = newPassword.trim();
+            }
+
+            if (Object.keys(payload).length === 0) {
+                showResponse('Błąd: brak danych do aktualizacji', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(apiUrl(`/api/db/users/${userId}`), {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showResponse(`Zaktualizowano uzytkownika ID: ${userId}`);
+                    getUsers();
+                } else {
+                    showResponse(`Błąd: ${data.error}`, true);
+                }
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        async function deleteUser(userId) {
+            const confirmed = confirm(`Czy na pewno usunąć użytkownika ID ${userId}?`);
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(apiUrl(`/api/db/users/${userId}`), {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showResponse(`Usunieto uzytkownika ID: ${userId}`);
+                    getUsers();
+                } else {
+                    showResponse(`Błąd: ${data.error}`, true);
+                }
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        async function uploadPDF() {
+            const fileInput = document.getElementById('pdfFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showResponse('Błąd: prosze wybrac plik PDF', true);
+                return;
+            }
+            
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                showResponse('Błąd: tylko pliki PDF sa dozwolone', true);
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch(apiUrl('/api/blob/upload'), {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    showResponse(`PDF uploaded: ${data.filename}<br>URL: ${data.url}`);
+                    fileInput.value = '';
+                } else {
+                    showResponse(`Błąd: ${data.error}`, true);
+                }
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        async function listBlobs() {
+            try {
+                const response = await fetch(apiUrl('/api/blob/list'));
+                const data = await response.json();
+                let html = '<h3>Pliki w Blob Storage:</h3>';
+                if (data.blobs.length === 0) {
+                    html += '<p>Brak plików PDF</p>';
+                } else {
+                    html += '<ul style="text-align: left;">';
+                    data.blobs.forEach(blob => {
+                        html += `<li><strong>${blob.name}</strong> (${blob.size} bytes, ${blob.last_modified})</li>`;
+                        html += `<div style="margin: 6px 0 12px 0;">`;
+                        html += `<button onclick="downloadBlob('${blob.name.replace(/'/g, "\\'")}')">Pobierz</button>`;
+                        html += `<button onclick="deleteBlob('${blob.name.replace(/'/g, "\\'")}')" style="background-color: #d83b01;">Usuń</button>`;
+                        html += `</div>`;
+                    });
+                    html += '</ul>';
+                }
+                showResponse(html);
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        function downloadBlob(blobName) {
+            window.open(apiUrl(`/api/blob/download/${encodeURIComponent(blobName)}`), '_blank');
+        }
+
+        async function deleteBlob(blobName) {
+            const confirmed = confirm(`Czy na pewno usunąć plik ${blobName}?`);
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(apiUrl(`/api/blob/${encodeURIComponent(blobName)}`), {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    showResponse(`Usunięto plik: ${blobName}`);
+                    listBlobs();
+                } else {
+                    showResponse(`Błąd: ${data.error}`, true);
+                }
+            } catch (error) {
+                showResponse(`Błąd: ${error.message}`, true);
+            }
+        }
+
+        function showResponse(html, isError = false) {
+            const responseDiv = document.getElementById('response');
+            responseDiv.style.display = 'block';
+            responseDiv.style.backgroundColor = isError ? '#ffe7e7' : '#e7f3ff';
+            responseDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

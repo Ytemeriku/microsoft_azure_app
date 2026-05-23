@@ -1,0 +1,72 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-backend:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-backend:${{ github.sha }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-frontend:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-frontend:${{ github.sha }}
+
+      - name: Build and push nginx image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./nginx
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-nginx:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/azure-app-nginx:${{ github.sha }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Container Apps
+        shell: pwsh
+        run: pwsh ./scripts/deploy_containerapps.ps1
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          IMAGE_TAG: ${{ github.sha }}
+          AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+          AZURE_LOG_ANALYTICS_WORKSPACE: ${{ secrets.AZURE_LOG_ANALYTICS_WORKSPACE }}
+          AZURE_CONTAINERAPPS_ENVIRONMENT: ${{ secrets.AZURE_CONTAINERAPPS_ENVIRONMENT }}
+          BACKEND_APP_NAME: ${{ secrets.BACKEND_APP_NAME }}
+          FRONTEND_APP_NAME: ${{ secrets.FRONTEND_APP_NAME }}
+          NGINX_APP_NAME: ${{ secrets.NGINX_APP_NAME }}
